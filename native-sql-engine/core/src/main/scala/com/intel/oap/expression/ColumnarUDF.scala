@@ -83,11 +83,66 @@ case class ColumnarURLDecoder(input: Expression) extends Expression with Columna
   }
 }
 
+case class ColumnarIsEmpty(input: Expression) extends Expression with ColumnarExpression {
+  def nullable: Boolean = {
+    true
+  }
+
+  def children: Seq[Expression] = {
+    Seq(input)
+  }
+
+  def dataType: DataType = {
+    StringType
+  }
+
+  def eval(input: InternalRow): Any = {
+    throw new UnsupportedOperationException("Should not trigger eval!")
+  }
+
+  def child: Expression = {
+    input
+  }
+
+  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+    throw new UnsupportedOperationException("Should not trigger code gen!")
+  }
+
+  protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): ColumnarIsEmpty = {
+    copy(input = newChildren.head)
+  }
+
+  buildCheck
+
+  def buildCheck: Unit = {
+    val supportedTypes = List(StringType)
+    if (!supportedTypes.contains(input.dataType)) {
+      throw new UnsupportedOperationException("Only StringType input is supported!")
+    }
+  }
+
+  override def supportColumnarCodegen(args: java.lang.Object): Boolean = {
+    false
+  }
+
+  override def doColumnarCodeGen(args: Object): (TreeNode, ArrowType) = {
+    val (inputNode, _): (TreeNode, ArrowType) =
+      input.asInstanceOf[ColumnarExpression].doColumnarCodeGen(args)
+    val resultType = new ArrowType.Bool()
+    val funcNode =
+      TreeBuilder.makeFunction(
+        "is_empty",
+        Lists.newArrayList(inputNode),
+        resultType)
+    (funcNode, resultType)
+  }
+}
+
 object ColumnarUDF {
   // Keep the supported UDF name. The name is specified in registering the
   // row based function in spark, e.g.,
   // CREATE TEMPORARY FUNCTION UrlDecoder AS 'com.intel.test.URLDecoderNew';
-  val supportList = List("urldecoder")
+  val supportList = List("urldecoder","zl.urldecoder","zl.isempty")
 
   def isSupportedUDF(name: String): Boolean = {
     if (name == null) {
@@ -101,6 +156,10 @@ object ColumnarUDF {
       // Hive UDF.
       case "urldecoder" =>
         ColumnarURLDecoder(children.head)
+      case "zl.urldecoder" =>
+        ColumnarURLDecoder(children.head)
+      case "zl.isempty" =>
+        ColumnarIsEmpty(children.head)
       // Scala UDF.
       case "scalaudf" =>
         original.asInstanceOf[ScalaUDF].udfName.get.toLowerCase() match {
